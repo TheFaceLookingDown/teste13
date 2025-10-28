@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Site Protegido - Teste</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+
+<style>
+  :root{ --bg:#000; --fg:#fff; --err:#ff3b3b; --muted:#999; }
+  html,body{height:100%;}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:'Press Start 2P', monospace;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:20px;
+  }
+  .wrap{ width:100%; max-width:900px; position:relative; }
+  #loginBox{ display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .pw-row{ display:flex; gap:8px; align-items:center; }
+  .input-wrap{ position:relative; }
+  input[type="password"], input[type="text"]{
+    background:transparent; border:2px solid var(--fg); color:var(--fg);
+    padding:12px 14px; outline:none; font-family:inherit; font-size:12px;
+    width:320px; box-sizing:border-box;
+  }
+  button{
+    padding:10px 14px; background:transparent; border:2px solid var(--fg);
+    color:var(--fg); cursor:pointer; font-family:inherit; font-size:11px;
+    text-transform:uppercase; letter-spacing:1px;
+  }
+  #errorMsg{ color:var(--err); font-size:10px; height:18px; visibility:hidden; }
+  #errorMsg.show{ visibility:visible; }
+  #soundToggle{ position:fixed; right:12px; top:12px; background:transparent; border:2px solid var(--fg); padding:8px; }
+  #content{ display:none; opacity:0; transition:opacity .45s ease; flex-direction:column; align-items:center; }
+  #content.show{ display:flex; opacity:1; }
+  #mainImage{ max-width:80%; max-height:45vh; object-fit:contain; border:2px solid var(--fg); margin-bottom:18px; position:relative; overflow:hidden; filter: drop-shadow(0 0 6px rgba(255,255,255,0.06)); }
+  #title{ font-size:14px; margin:8px 0 20px 0; line-height:1.1; max-width:900px; }
+  #text{ font-size:10px; max-width:820px; white-space:pre-wrap; text-align:center; }
+  /* debug password box (test only) */
+  #debugPwd{
+    position:fixed;
+    right:10px;
+    bottom:10px;
+    background:rgba(255,255,255,0.03);
+    border:1px solid rgba(255,255,255,0.08);
+    color:var(--muted);
+    padding:8px 10px;
+    font-size:11px;
+    font-family:'Press Start 2P',monospace;
+    z-index:9999;
+    max-width:220px;
+    word-break:break-all;
+  }
+  @media (max-width:420px){
+    input[type="password"]{ width:90%; } #title{ font-size:9px; } #text{ font-size:8px; }
+    #debugPwd{ font-size:9px; right:6px; bottom:6px; padding:6px; max-width:160px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <button id="soundToggle">Som</button>
+
+  <div id="loginBox">
+    <div class="pw-row">
+      <div class="input-wrap">
+        <input id="passwordInput" type="password" placeholder="Digite a senha" autocomplete="off" />
+      </div>
+      <button id="eyeBtn">Mostrar</button>
+    </div>
+    <div style="display:flex; gap:12px; justify-content:center; margin-top:8px;">
+      <button id="enterBtn">Entrar</button>
+      <button id="clearBtn">Limpar</button>
+    </div>
+    <div id="errorMsg"></div>
+  </div>
+
+  <div id="content">
+    <img id="mainImage" src="" alt="" />
+    <h1 id="title"></h1>
+    <div id="text"></div>
+  </div>
+</div>
+
+<!-- debug: mostra a senha lida (apague depois dos testes) -->
+<div id="debugPwd">Senha (teste): —</div>
+
+<script>
+// -----------------------
+// Fixos
+const TXT_FILE = "one.txt";
+const IMG_FILE = "zero.jpg";
+const TYPING_SPEED = 16;
+
+// Elementos
+const pwInput = document.getElementById('passwordInput');
+const enterBtn = document.getElementById('enterBtn');
+const clearBtn = document.getElementById('clearBtn');
+const eyeBtn = document.getElementById('eyeBtn');
+const loginBox = document.getElementById('loginBox');
+const errorMsg = document.getElementById('errorMsg');
+const content = document.getElementById('content');
+const mainImage = document.getElementById('mainImage');
+const titleEl = document.getElementById('title');
+const textEl = document.getElementById('text');
+const debugBox = document.getElementById('debugPwd');
+const soundToggle = document.getElementById('soundToggle');
+
+let config = { senha:'', titulo:'', texto:'' };
+let soundEnabled = true;
+
+// -----------------------
+// Audio
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+function ensureAudioCtx(){ if(!audioCtx) audioCtx = new AudioCtx(); }
+function beep(freq=1600, dur=0.03){
+  if(!soundEnabled) return;
+  ensureAudioCtx();
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type='square';
+  o.frequency.value=freq;
+  g.gain.value=0.05;
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start();
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+dur);
+  o.stop(audioCtx.currentTime+dur+0.02);
+}
+function keyBeep(){ beep(); }
+
+// -----------------------
+// Censura (substitui * por símbolo aleatório)
+function censuraChar(){
+  const arr = ['@','#','$','%','!','&','?','+'];
+  return arr[Math.floor(Math.random()*arr.length)];
+}
+function aplicarCensuraTexto(str){
+  // substitui cada '*' por um caractere aleatório (dinâmico ao digitar)
+  return str.split('').map(c => c === '*' ? censuraChar() : c).join('');
+}
+
+// -----------------------
+// Carregar one.txt
+async function carregarTXT(){
+  try{
+    const txt = await fetch(TXT_FILE).then(r=>{
+      if(!r.ok) throw new Error('fetch fail');
+      return r.text();
+    });
+    const p = txt.split(/\n\n/).map(s=>s.trim()).filter(Boolean);
+    // interpretação: 1º parágrafo = senha, 2º = título, resto = texto
+    config.senha = p[0] || '';
+    config.titulo = p[1] || '';
+    config.texto = p.slice(2).join('\n\n') || '';
+    // mostra no debug
+    debugBox.textContent = 'Senha (teste): ' + (config.senha || '—');
+  }catch(e){
+    debugBox.textContent = 'Erro carregando ' + TXT_FILE;
+    alert('Erro ao carregar ' + TXT_FILE + '. Verifique se o arquivo existe na mesma pasta.');
+  }
+}
+
+// -----------------------
+// Login
+function showError(msg){
+  errorMsg.textContent = msg;
+  errorMsg.classList.add('show');
+}
+function clearError(){ errorMsg.textContent=''; errorMsg.classList.remove('show'); }
+
+function attemptEnter(){
+  clearError();
+  if(pwInput.value === config.senha){
+    revealContent();
+  } else {
+    showError("Senha incorreta!");
+    keyBeep();
+  }
+}
+
+// -----------------------
+// Revelar conteúdo
+async function revealContent(){
+  loginBox.style.display = 'none';
+  content.style.display = 'flex';
+  mainImage.src = IMG_FILE;
+  titleEl.textContent = config.titulo || '';
+  await typeText(config.texto || '');
+}
+
+// typing com censura dinâmica
+async function typeText(txt){
+  textEl.textContent = '';
+  for(let i=0;i<txt.length;i++){
+    const ch = txt[i];
+    if(ch === '*'){
+      textEl.textContent += censuraChar();
+    } else {
+      textEl.textContent += ch;
+    }
+    if(i % 3 === 0) keyBeep();
+    await new Promise(r=>setTimeout(r, TYPING_SPEED));
+  }
+}
+
+// -----------------------
+// Botões
+enterBtn.onclick = attemptEnter;
+clearBtn.onclick = ()=>{ pwInput.value=''; pwInput.focus(); keyBeep(); };
+eyeBtn.onclick = ()=>{ pwInput.type = pwInput.type === 'password' ? 'text' : 'password'; };
+soundToggle.onclick = ()=>{ soundEnabled = !soundEnabled; soundToggle.textContent = soundEnabled ? 'Som' : 'Mudo'; };
+
+// Enter key
+pwInput.addEventListener('keypress', e=>{ if(e.key === 'Enter') attemptEnter(); });
+
+// Inicial: carrega txt e mostra senha no canto (teste)
+carregarTXT();
+</script>
+</body>
+</html>
